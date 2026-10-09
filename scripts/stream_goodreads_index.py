@@ -433,7 +433,7 @@ class GoodreadsStreamIndexer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stream index Goodreads 2.36M books")
-    parser.add_argument("--gz-path", default=r"c:\Users\tejas\Downloads\goodreads_books.json.gz", help="Path to goodreads_books.json.gz")
+    parser.add_argument("--gz-path", default=r"data/goodreads_books.json.gz", help="Path to goodreads_books.json.gz")
     parser.add_argument("--max-books", type=int, default=None, help="Maximum number of books to index (default: all)")
     parser.add_argument("--batch-size", type=int, default=128, help="Batch size for embedding generation")
     parser.add_argument("--min-ratings", type=int, default=0, help="Minimum ratings_count filter")

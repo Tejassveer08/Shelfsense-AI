@@ -60,7 +60,7 @@ graph TD
 
 ### 1. Clone & Setup Environment
 ```bash
-git clone https://github.com/your-username/shelfsense.git
+git clone https://github.com/Tejassveer08/Shelfsense-AI
 cd shelfsense
 cp .env.example .env
 ```
