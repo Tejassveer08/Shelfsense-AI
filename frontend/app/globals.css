@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #FAF7F2;
+  --bg-surface: #FFFFFF;
+  --bg-surface-elevated: #F4EFEA;
+  --text-primary: #18181B;
+  --text-muted: #52525B;
+  --border-library: #E7E0D6;
+  --accent-amber: #D97706;
+  --accent-amber-glow: rgba(217, 119, 6, 0.15);
+  --accent-teal: #0F766E;
+  --accent-burgundy: #991B1B;
+}
+
+.dark {
+  --bg-primary: #0D1117;
+  --bg-surface: #161B22;
+  --bg-surface-elevated: #21262D;
+  --text-primary: #F0F6FC;
+  --text-muted: #8B949E;
+  --border-library: #30363D;
+  --accent-amber: #F59E0B;
+  --accent-amber-glow: rgba(245, 158, 11, 0.25);
+  --accent-teal: #14B8A6;
+  --accent-burgundy: #EF4444;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, .font-editorial {
+  font-family: 'Newsreader', Georgia, serif;
+  letter-spacing: -0.015em;
+}
+
+/* 3D Book Cover Tilt */
+.book-cover-container {
+  perspective: 1000px;
+}
+
+.book-cover-3d {
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.35s ease;
+  transform-style: preserve-3d;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.18), 0 2px 6px -1px rgba(0, 0, 0, 0.12);
+}
+
+.book-cover-3d:hover {
+  transform: translateY(-6px) rotateY(-4deg) rotateX(3deg) scale(1.02);
+  box-shadow: 0 20px 32px -8px rgba(0, 0, 0, 0.25), 0 8px 12px -2px rgba(0, 0, 0, 0.15);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-library);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
