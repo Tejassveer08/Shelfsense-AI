@@ -1,4 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "ONNXRUNTIME_NODE_INSTALL=skip npm install"
+  "installCommand": "ONNXRUNTIME_NODE_INSTALL=skip npm install",
+  "regions": ["bom1"]
 }

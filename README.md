@@ -140,8 +140,10 @@ Measured with float32 vectors and descriptions capped at 2,000 characters: **abo
 ## Deploying to Vercel
 
 1. **Atlas:** create a cluster, a database user, and allow network access from Vercel. `0.0.0.0/0`, or the Vercel ↔ Atlas integration, which also sets `MONGODB_URI` for you.
-2. **Load the data** from your machine with `MONGODB_URI` pointing at Atlas (see above). Wait until `scripts/setup_indexes.py` reports that both search indexes are queryable.
+2. **Load the data** from your machine with `MONGODB_URI` pointing at Atlas (see above). Wait until `scripts/setup_indexes.py` reports that both search indexes are queryable. On the free and Flex tiers Atlas caps aggregation memory, so the authors and series collections are built on your machine instead; the script does this automatically.
 3. **Import the repo** in Vercel. It is a standard Next.js project at the repository root, so no build settings are needed.
+   - **Run functions next to the database.** `vercel.json` pins them to `bom1` (Mumbai) to match an Atlas cluster in `ap-south-1`. A search makes several database calls, so a cross-continent hop multiplies its latency (4–9 s instead of about 2 s here). Change `regions` to the [Vercel region](https://vercel.com/docs/regions) nearest your cluster.
+   - **Deploying from the CLI** (`npx vercel deploy --prod`) uploads only what `.vercelignore` allows, so `data/`, `models/` and `.env*` stay on your machine.
 4. **Environment variables** (Project → Settings → Environment Variables):
 
 | Variable | Required | Notes |
