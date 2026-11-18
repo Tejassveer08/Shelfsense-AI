@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { hybridSearch } from "@/lib/server/search";
+import { getBook } from "@/lib/server/books";
 import { planSearch, streamLibrarianAnswer } from "@/lib/server/llm";
 import { FiltersSchema, IdSchema, SlidersSchema, errorResponse, parseBody, rateLimit } from "@/lib/server/http";
 import type { LibrarianPlan } from "@/lib/types";
@@ -39,17 +40,26 @@ export async function POST(req: Request) {
       try {
         const plan: LibrarianPlan = await planSearch(body.messages, body.previous as LibrarianPlan | undefined);
         send({ type: "plan", plan });
-        const search = await hybridSearch({
-          query: plan.searchQuery,
-          filters: plan.filters,
-          sliders: plan.sliders,
-          raw: true,
-          limit: 8,
-          excludeIds: [...(body.shownIds ?? []), ...(body.readIds ?? [])],
-        });
-        const books = search.results.map((b) => ({ ...b, description: b.description.slice(0, 400) }));
+        const excludeIds = [...(body.shownIds ?? []), ...(body.readIds ?? [])];
+        const run = (query: string, limit: number, extra: { noAnchor?: boolean; affinityGenres?: string[] } = {}) =>
+          hybridSearch({ query, filters: plan.filters, sliders: plan.sliders, raw: true, limit, excludeIds, ...extra });
+        const search = await run(plan.searchQuery, plan.altQuery ? 6 : 8);
+        // the description search stays in the anchor book's genre neighbourhood
+        const anchorBook = plan.altQuery && search.intent.anchor ? await getBook(search.intent.anchor.id) : null;
+        const alt = plan.altQuery ? await run(plan.altQuery, 8, { noAnchor: true, affinityGenres: anchorBook?.genres }) : null;
+        let results = search.results;
+        if (alt) {
+          // interleave "close to the anchor" with "matches the difference", minus the anchor and its author
+          const anchor = search.intent.anchor;
+          const seen = new Set(results.map((b) => b.id));
+          const extra = alt.results.filter(
+            (b) => !seen.has(b.id) && b.id !== anchor?.id && !(anchor?.authors[0] && b.authors[0] === anchor.authors[0]),
+          );
+          results = results.flatMap((b, i) => (extra[i] ? [b, extra[i]] : [b])).concat(extra.slice(results.length)).slice(0, 10);
+        }
+        const books = results.map((b) => ({ ...b, description: b.description.slice(0, 400) }));
         send({ type: "books", books, mode: search.mode });
-        for await (const delta of streamLibrarianAnswer(body.messages, search.results)) {
+        for await (const delta of streamLibrarianAnswer(body.messages, results)) {
           send({ type: "text", delta });
         }
         send({ type: "done" });

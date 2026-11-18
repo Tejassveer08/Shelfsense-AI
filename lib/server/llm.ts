@@ -179,29 +179,35 @@ export async function planSearch(messages: ChatMessage[], previous?: LibrarianPl
   }>(
     `Conversation so far:\n${transcript}\n\nPrevious search: ${JSON.stringify(previous ?? null)}\n\n` +
       `Write the catalogue search that best serves the reader's LATEST message, keeping earlier preferences unless they changed them.\n` +
-      `Return JSON: {"search_query": "a rich descriptive query of themes, setting, style and comparable titles/authors (not a question)", ` +
+      `Return JSON: {"search_query": "a rich description of the book the reader wants: themes, setting, tone, style (not a question; when they name a book to compare with, describe the book they want instead of naming it)", ` +
       `"category": one of ${JSON.stringify(CATEGORIES)} or null, "tone": one of ["joy","sadness","fear","anger","surprise"] or null, ` +
       `"year_min": int|null, "year_max": int|null, "max_pages": int|null, "min_rating": number|null, ` +
-      `"sliders": {"dark_light": -1..1|null (dark→light), "pacing": -1..1|null (fast→slow), "cerebral_escapist": -1..1|null, "length_scale": -1..1|null (short→epic)}}. ` +
-      `"anchor_title": if the reader wants books similar to ONE specific book they name, its exact title, else null; ` +
+      `"sliders": {"dark_light": -1 (dark) .. +1 (light) | null, "pacing": -1 (fast, page-turner) .. +1 (slow, meditative) | null, ` +
+      `"cerebral_escapist": -1 (cerebral) .. +1 (escapist) | null, "length_scale": -1 (short) .. +1 (epic) | null}, ` +
+      `"anchor_title": if the reader wants books similar to ONE specific book they name, its exact title, else null, ` +
       `"difference": when anchor_title is set, a few words on how they want it to differ (e.g. "funnier, less science"), else null}. ` +
-      `Only set filters the reader actually asked for.`,
+      `Be conservative: every filter and slider removes or reorders books, so leave it null unless the reader explicitly asked for it. ` +
+      `"tone" is a hard filter — set it only when the reader names the mood they want (e.g. "something sad"). ` +
+      `Set a slider only for an axis the reader mentions (e.g. "lighter" → dark_light 0.5, "a page-turner" → pacing -0.6); "funny" alone is not a pacing or length request.`,
     LIBRARIAN_SYSTEM,
     10_000,
   );
   if (plan?.search_query) {
+    const anchor = plan.anchor_title?.trim();
     const filters: Filters = {
       category: CATEGORIES.includes(plan.category as (typeof CATEGORIES)[number]) ? plan.category : null,
-      tone: (["joy", "sadness", "fear", "anger", "surprise"] as const).find((t) => t === plan.tone) ?? null,
+      // a "like <book>" search already carries that book's mood; a hard tone filter on top empties it
+      tone: anchor ? null : ((["joy", "sadness", "fear", "anger", "surprise"] as const).find((t) => t === plan.tone) ?? null),
       yearMin: plan.year_min ?? null,
       yearMax: plan.year_max ?? null,
       maxPages: plan.max_pages ?? null,
       minRating: plan.min_rating ?? null,
     };
-    const anchor = plan.anchor_title?.trim();
     return {
       // "like <title>" makes the search engine anchor on that book's own vector
       searchQuery: anchor ? `like ${anchor}${plan.difference ? ` but ${plan.difference}` : ""}` : plan.search_query,
+      // the anchor's vector dominates "like X"; the description finds the "but …" part
+      ...(anchor && plan.difference ? { altQuery: plan.search_query } : {}),
       filters: mergeFilters(filters),
       sliders: mergeSliders(Object.fromEntries(Object.entries(plan.sliders ?? {}).filter(([, v]) => typeof v === "number")) as Sliders),
     };

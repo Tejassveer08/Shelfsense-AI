@@ -126,6 +126,8 @@ export interface LibrarianPlan {
   filters: Filters;
   sliders: Sliders;
   reply?: string;
+  /** For "like X but …": a plain description of the book wanted, searched alongside the anchor. */
+  altQuery?: string;
 }
 
 export interface ReaderInsights {

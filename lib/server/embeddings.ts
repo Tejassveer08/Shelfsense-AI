@@ -1,5 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { Binary } from "mongodb";
 import { getDb, vectorFormat } from "./mongo";
 import { TTLCache } from "./cache";
@@ -9,9 +11,10 @@ import { TTLCache } from "./cache";
  * embedded with, so query and book vectors live in the same space.
  *
  * Providers (EMBEDDINGS_PROVIDER):
- *   hf    Hugging Face Inference API (needs HF_TOKEN; tiny, works on Vercel)
- *   local @huggingface/transformers running ONNX in Node (local dev; no key)
- *   auto  hf if HF_TOKEN is set, else local when not on Vercel, else none
+ *   local @huggingface/transformers running ONNX in Node — free, no key, works locally and on
+ *         Vercel (the model is bundled into the function by `npm run build`)
+ *   hf    Hugging Face Inference API (needs HF_TOKEN with credits; falls back to local on error)
+ *   auto  (default) = local
  *   none  keyword search only
  */
 
@@ -27,9 +30,7 @@ let lastError: string | undefined;
 export function embeddingProvider(): Provider {
   const configured = (process.env.EMBEDDINGS_PROVIDER || "auto").toLowerCase();
   if (configured === "hf" || configured === "local" || configured === "none") return configured;
-  if (process.env.HF_TOKEN) return "hf";
-  if (!process.env.VERCEL) return "local";
-  return "none";
+  return "local";
 }
 
 export function embeddingStatus() {
@@ -75,11 +76,16 @@ let localExtractor: Promise<Extractor> | undefined;
 async function embedLocal(texts: string[]): Promise<Float32Array[]> {
   if (!localExtractor) {
     localExtractor = (async () => {
-      const moduleName = "@huggingface/transformers";
-      const tf = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ moduleName)) as {
-        pipeline: (task: string, model: string, opts?: Record<string, unknown>) => Promise<Extractor>;
-      };
-      return tf.pipeline("feature-extraction", LOCAL_MODEL, { dtype: "fp32" });
+      const tf = await import("@huggingface/transformers");
+      // `npm run build` downloads the model into ./models, which ships inside the Vercel function
+      const modelsDir = path.join(process.cwd(), "models");
+      if (existsSync(path.join(modelsDir, LOCAL_MODEL, "onnx", "model.onnx"))) {
+        tf.env.localModelPath = modelsDir;
+        tf.env.allowRemoteModels = false;
+      } else if (process.env.VERCEL) {
+        tf.env.cacheDir = "/tmp/transformers-cache"; // the deployment itself is read-only
+      }
+      return (await tf.pipeline("feature-extraction", LOCAL_MODEL, { dtype: "fp32" })) as unknown as Extractor;
     })().catch((err) => {
       localExtractor = undefined;
       throw err;
@@ -100,8 +106,18 @@ async function embedRaw(texts: string[]): Promise<Float32Array[] | null> {
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);
     console.warn(`[embeddings] ${provider} failed: ${lastError}`);
-    return null;
   }
+  if (provider === "hf") {
+    // out of Hugging Face credits, rate-limited or down: the bundled model gives identical vectors
+    try {
+      const result = await embedLocal(texts);
+      lastError = undefined;
+      return result;
+    } catch (err) {
+      console.warn(`[embeddings] local fallback failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  return null;
 }
 
 const key = (text: string) => createHash("sha1").update(`${MODEL}\n${text}`).digest("hex");

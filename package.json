@@ -5,14 +5,17 @@
   "description": "AI book discovery over the Goodreads catalogue — Next.js on Vercel + MongoDB Atlas Vector Search",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/fetch-model.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose up -d mongo",
-    "db:indexes": "py -3.11 scripts/setup_indexes.py"
+    "db:indexes": "py -3.11 scripts/setup_indexes.py",
+    "model": "node scripts/fetch-model.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
     "@vercel/functions": "^3.11.3",
     "clsx": "^2.1.1",
     "lucide-react": "^1.74.0",
@@ -23,9 +26,6 @@
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.7.0",
     "zod": "^4.6.7"
-  },
-  "optionalDependencies": {
-    "@huggingface/transformers": "^4.3.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

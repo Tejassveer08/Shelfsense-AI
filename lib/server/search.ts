@@ -265,6 +265,10 @@ export interface SearchOptions {
   /** Skip the rule-based query parser (the caller already decided filters/sliders). */
   raw?: boolean;
   snippets?: boolean;
+  /** Treat "like X" in the query as plain words rather than anchoring on book X. */
+  noAnchor?: boolean;
+  /** Favour books whose Goodreads shelves overlap these (as a "like X" search does with X's). */
+  affinityGenres?: string[];
 }
 
 const LIKE_PATTERN = /\b(?:like|similar to|in the vein of|reminds? me of|fans? of|if i (?:liked|loved|enjoyed))\s+(?:the (?:book|novel) )?["“']?(.+?)["”']?(?:\s+(?:but|except|with|only|and|,)\s+(.*))?$/i;
@@ -316,7 +320,7 @@ async function matchAuthor(query: string): Promise<string | null> {
 export async function hybridSearch(opts: SearchOptions): Promise<SearchResponse> {
   const started = Date.now();
   const limit = Math.min(opts.limit ?? 24, 60);
-  const [anchor, author] = await Promise.all([resolveAnchor(opts.query), matchAuthor(opts.query)]);
+  const [anchor, author] = await Promise.all([opts.noAnchor ? null : resolveAnchor(opts.query), matchAuthor(opts.query)]);
   // For "like <title> but <modifier>", only the modifier carries constraints — a title such as
   // "A Short History of…" must not turn into a length filter.
   const parseText = anchor ? anchor.modifier : opts.query;
@@ -334,7 +338,11 @@ export async function hybridSearch(opts: SearchOptions): Promise<SearchResponse>
   const exclude = new Set(opts.excludeIds ?? []);
   const anchorSeries = new Set((anchor?.doc.series ?? []).map((s) => s.name.toLowerCase()));
   const anchorTitle = anchor?.doc.title.toLowerCase();
-  const anchorGenres = anchor ? genreProfile([anchor.doc.genres ?? []]) : null;
+  const anchorGenres = anchor
+    ? genreProfile([anchor.doc.genres ?? []])
+    : opts.affinityGenres?.length
+      ? genreProfile([opts.affinityGenres])
+      : null;
   const queryWords = new Set(queryTokens(intent.semanticQuery || opts.query));
   const exactTitle = opts.query.trim().toLowerCase().replace(/^the\s+/, "");
   if (anchor) {
@@ -378,11 +386,13 @@ export async function hybridSearch(opts: SearchOptions): Promise<SearchResponse>
   const maxRrf = Math.max(0, ...[...cands.values()].map((c) => c.rrf)) || 1;
 
   const docs = await getBookDocs([...cands.keys()].filter((id) => !exclude.has(id)));
-  const scored: ScoredBook[] = [];
+  let scored: ScoredBook[] = [];
+  const offTone = new Set<string>();
   for (const c of cands.values()) {
     const doc = docs.get(c.id);
     if (!doc) continue;
-    if (filters.tone && !matchesTone(doc, filters.tone)) continue;
+    // tone is a soft-hard filter: off-tone books are held back and only used if too few match
+    if (filters.tone && !matchesTone(doc, filters.tone)) offTone.add(c.id);
     if (anchor) {
       // skip the rest of its series and companion books ("The Hunger Games Tribute Guide")
       if (doc.series?.some((s) => anchorSeries.has(s.name.toLowerCase()))) continue;
@@ -413,6 +423,11 @@ export async function hybridSearch(opts: SearchOptions): Promise<SearchResponse>
     scored.push({ ...toBook(doc, 700), score: final, similarity: c.ds ?? undefined, ranking });
   }
   scored.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  if (offTone.size) {
+    const onTone = scored.filter((b) => !offTone.has(b.id));
+    const MIN_ON_TONE = Math.min(limit, 6);
+    scored = onTone.length >= MIN_ON_TONE ? onTone : [...onTone, ...scored.filter((b) => offTone.has(b.id))];
+  }
   const results = scored.slice(0, limit);
   if (opts.snippets !== false) await attachSnippets(results, intent.semanticQuery || opts.query, queryVec);
 
