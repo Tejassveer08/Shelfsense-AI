@@ -1,0 +1,216 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --paper: #f7f3ec;
+  --surface: #fffdf9;
+  --surface-2: #f0eadf;
+  --ink: #1d1b18;
+  --ink-2: #3b372f;
+  --muted: #6f685d;
+  --line: #e6ddcf;
+  --accent: #d4522a;
+  --accent-soft: #f9e2d6;
+  --ai-1: #6a5cff;
+  --ai-2: #b44cf0;
+  --ai-soft: #ece9ff;
+  --star: #e6a23c;
+  --shadow: 28 20 10;
+}
+
+.dark {
+  --paper: #0d0e12;
+  --surface: #15171d;
+  --surface-2: #1d2028;
+  --ink: #f2eee7;
+  --ink-2: #d6d1c8;
+  --muted: #9a958b;
+  --line: #2a2e38;
+  --accent: #ff7b4f;
+  --accent-soft: #3a2119;
+  --ai-1: #8c80ff;
+  --ai-2: #d27cff;
+  --ai-soft: #221f3d;
+  --star: #f0b34c;
+  --shadow: 0 0 0;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ai-1: var(--ai-1);
+  --color-ai-2: var(--ai-2);
+  --color-ai-soft: var(--ai-soft);
+  --color-star: var(--star);
+  --font-serif: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+}
+
+/* Subtle paper grain + glow behind the hero */
+.hero-glow {
+  background:
+    radial-gradient(60% 50% at 20% 0%, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 45% at 85% 10%, color-mix(in oklab, var(--ai-1) 16%, transparent) 0%, transparent 70%);
+}
+
+.ai-gradient {
+  background-image: linear-gradient(120deg, var(--ai-1), var(--ai-2));
+}
+.ai-text {
+  background-image: linear-gradient(120deg, var(--ai-1), var(--ai-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ai-border {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    linear-gradient(120deg, var(--ai-1), var(--ai-2)) border-box;
+}
+
+.book-shadow {
+  box-shadow:
+    0 1px 2px rgb(var(--shadow) / 0.12),
+    0 8px 22px -8px rgb(var(--shadow) / 0.35);
+}
+.dark .book-shadow {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 10px 26px -10px rgb(0 0 0 / 0.8);
+}
+
+/* the spine highlight that makes a flat cover read as a book */
+.book-spine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.18) 0, rgb(255 255 255 / 0) 6%, rgb(0 0 0 / 0.12) 7.5%, rgb(0 0 0 / 0) 12%);
+  pointer-events: none;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* range input */
+input[type="range"].vibe {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  width: 100%;
+}
+input[type="range"].vibe::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+input[type="range"].vibe::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+input[type="range"].vibe::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 18px;
+  width: 18px;
+  margin-top: -6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
+  cursor: grab;
+}
+input[type="range"].vibe::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  cursor: grab;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--surface) 60%, transparent), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+.caret::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--ai-1);
+  animation: blink 1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .skeleton::after,
+  .caret::after {
+    animation: none;
+  }
+}

@@ -1,3 +1,33 @@
-data/chroma_db/0c98f341-d531-42af-83f5-9672c7dfff94/data_level0.bin
-data/goodreads.db
-data/chroma_db/chroma.sqlite3
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# next.js / vercel
+/.next/
+/out/
+/build
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+
+# env files (commit .env.example only)
+.env
+.env*.local
+.env.development
+.env.production
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# data: Goodreads dumps and generated indexes are large and licensed for academic use only
+data/*
+!data/.gitkeep
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*

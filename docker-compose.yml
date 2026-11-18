@@ -1,28 +1,16 @@
-version: "3.8"
-
+# Local development database: MongoDB with Atlas Search + Vector Search (same features as Atlas).
+#   docker compose up -d mongo
+#   MONGODB_URI=mongodb://localhost:27017/?directConnection=true
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+  mongo:
+    image: mongodb/mongodb-atlas-local:8.0
     ports:
-      - "8000:8000"
-    environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - HOST=0.0.0.0
-      - PORT=8000
+      - "27017:27017"
     volumes:
-      - ./data:/app/data
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
     restart: unless-stopped
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://backend:8000
-    depends_on:
-      - backend
-    restart: unless-stopped
+volumes:
+  mongo-data:
+  mongo-config:

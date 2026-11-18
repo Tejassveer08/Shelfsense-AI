@@ -1,261 +1,205 @@
-# ShelfSense — LLM-Powered Semantic Book Recommender
+# ShelfSense — AI book discovery on Vercel + MongoDB Atlas
 
-> Describe what you want to read in plain English (*"a slow, melancholic novel about leaving home, nothing too long"*) and discover ranked, explainable literary recommendations.
+> Describe what you want to read in plain English — *"a slow, melancholic novel about leaving home, nothing too long"*, *"like The Martian but funnier"* — and get ranked, explained recommendations from the Goodreads catalogue.
 
-ShelfSense is a modern, editorial semantic book discovery application built on the UCSD Goodreads Book Graph (2.36M books, indexed in full or as a subset). It features hybrid dense-sparse retrieval (Dense Embeddings + BM25 with Reciprocal Rank Fusion), continuous multidimensional **Vibe Sliders**, 9-dimensional **Book DNA** radar charts with side-by-side comparison, a persistent **Reading Shelf**, and a conversational **Refine with AI** librarian drawer.
-
----
-
-## Architecture Overview
-
-```mermaid
-graph TD
-    subgraph DataPipeline["Data Pipeline (scripts/)"]
-        AuthorsGz["goodreads_book_authors.json.gz"] --> AuthorsDB[("authors.db")]
-        BooksGz["goodreads_books.json.gz"] --> Stream["Streaming Parse & Filter"]
-        AuthorsDB --> Stream
-        Stream --> DenseEmbed["Dense Embeddings: all-MiniLM-L6-v2"]
-        DenseEmbed --> Vibes["Vibe Axes + 7 Emotion Scores (Anchor Projections)"]
-        DenseEmbed --> ChromaDB[("ChromaDB Collection: goodreads_books")]
-        Stream --> SQLite[("goodreads.db: Metadata + FTS5 BM25 Index")]
-        Vibes --> SQLite
-    end
-
-    subgraph Backend["FastAPI Backend (backend/app/)"]
-        FastAPI[FastAPI Gateway]
-        FastAPI --> SearchAPI["POST /api/search (Hybrid RRF + Sliders)"]
-        FastAPI --> SimilarAPI["POST /api/similar (Taste Vector + Contrast)"]
-        FastAPI --> ExplainAPI["POST /api/explain (Gemini / Offline Fallback)"]
-        FastAPI --> ChatAPI["POST /api/chat (Conversational Refine)"]
-        FastAPI --> BookAPI["GET /api/book/{isbn13}"]
-        FastAPI --> HealthAPI["GET /api/health"]
-
-        SearchAPI --> RetrievalService[Retrieval & Ranking Engine]
-        RetrievalService --> ChromaDB
-        RetrievalService --> SQLite
-        ExplainAPI --> LLMService[Pluggable LLM Provider]
-        ChatAPI --> LLMService
-    end
-
-    subgraph Frontend["Next.js App Router & TypeScript (frontend/)"]
-        ExplorerView["Explorer / Hero & Results Grid"]
-        VibeToolbar["Vibe Sliders Toolbar (Live Re-rank)"]
-        BookDetailModal["Book Detail & DNA Radar Modal"]
-        TasteModal["Taste Profile ('Books I Love')"]
-        ShelfView["Reading Shelf (Drag-and-Drop)"]
-        ChatDrawer["Conversational Refine Drawer"]
-    end
-
-    Frontend --> Backend
-```
-
----
-
-## Quickstart
-
-### 1. Clone & Setup Environment
-```bash
-git clone https://github.com/Tejassveer08/Shelfsense-AI.git
-cd Shelfsense-AI
-cp .env.example .env
-```
-*(Optional: add your Gemini API key to `.env` for LLM-written explanations; `.env.example` lists the variable name. Without a key, the app uses the offline fallback.)*
-
-### 2. Install Backend Dependencies
-```bash
-py -3.11 -m pip install -r requirements.txt
-```
-*(On macOS/Linux, use `python3.11` instead of `py -3.11`.)*
-
-### 3. Download the Data
-ShelfSense uses the [UCSD Book Graph](https://mcauleylab.ucsd.edu/public_datasets/gdrive/goodreads/UCSD%20Book%20Graph.html) Goodreads data. Download these two files from the dataset page into a `data/` folder in the project root:
-
-- [`goodreads_books.json.gz`](https://mcauleylab.ucsd.edu/public_datasets/gdrive/goodreads/goodreads_books.json.gz): book metadata (2.36M books)
-- `goodreads_book_authors.json.gz`: author names (linked under "Author information" on the dataset page)
-
-> The data is for academic use only and may not be redistributed or used commercially. See [Data Sources & Citation](#data-sources--citation).
-
-### 4. Build the Search Index
-First build the author lookup, then stream the books into the index:
-
-```bash
-py -3.11 scripts/build_authors_db.py --gz-path data/goodreads_book_authors.json.gz
-py -3.11 scripts/stream_goodreads_index.py --gz-path data/goodreads_books.json.gz --min-ratings 100
-```
-
-`stream_goodreads_index.py` reads the file line by line, so memory use stays low. For each book it embeds the text with `all-MiniLM-L6-v2`, computes the vibe and emotion scores, and writes to a SQLite database with FTS5 full-text search (`data/goodreads.db`) and a ChromaDB collection (`data/chroma_db/`, collection `goodreads_books`).
-
-| Option | Default | Purpose |
-|---|---|---|
-| `--gz-path` | none (always pass it) | Path to `goodreads_books.json.gz` |
-| `--max-books` | all | Stop after this many books are indexed |
-| `--min-ratings` | `0` | Skip books with fewer ratings than this |
-| `--min-words` | `20` | Skip books whose description is shorter than this |
-| `--batch-size` | `128` | Books embedded per batch |
-
-- **Start with a subset.** Indexing all 2.36M books takes a long time and a lot of disk space. `--min-ratings 100` keeps the better-known books; add `--max-books 5000` for a quick test.
-- **It is resumable.** If you interrupt the script, run the same command again and it skips books that are already indexed. Live progress is written to `data/ingestion_status.json`.
-- **Stop the backend while indexing,** then restart it afterwards. ChromaDB's local store is not designed for several processes using it at once.
-- **GPU tip:** with an NVIDIA GPU, install a CUDA build of PyTorch from [pytorch.org](https://pytorch.org) to speed up indexing considerably.
-- If `data/authors.db` is missing, the script still runs but shows authors as "Author &lt;id&gt;".
-
-### 5. Start Backend Server
-```bash
-py -3.11 -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-```
-On startup the console should report the number of books loaded from `goodreads.db` and from the `goodreads_books` Chroma collection. If search returns no results, check these two lines first. The first search after startup is slow while models and the database warm up.
-
-### 6. Install Frontend Dependencies & Start App
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Visit **http://localhost:3000** to explore the library!
-
-### Optional: Run the Backend with Docker
-The backend has a `Dockerfile` (CPU-only PyTorch). Build it from the **repository root**, because the image copies `backend/` and `scripts/`:
-
-```bash
-docker build -f backend/Dockerfile -t shelfsense-backend .
-```
-
-Run it with your `.env` and the `data/` folder mounted. The data is deliberately **not baked into the image**; build the index first (step 4).
-
-```bash
-# macOS / Linux
-docker run --rm -p 8000:8000 --env-file .env -v "$(pwd)/data:/app/data" shelfsense-backend
-
-# Windows PowerShell
-docker run --rm -p 8000:8000 --env-file .env -v "${PWD}/data:/app/data" shelfsense-backend
-```
-
-The API is then available at http://localhost:8000 (health check: http://localhost:8000/api/health). The frontend still runs separately with `npm run dev`.
-
-### Running Tests
-The retrieval tests use a tiny synthetic database and fake models, so they need neither the index nor an API key:
-
-```bash
-py -3.11 -m pytest backend/tests/test_retrieval_goodreads.py
-```
-*(The first run is slow while PyTorch and the other libraries load.)*
-
----
-
-## Data & Generated Files
-
-Everything under `data/` is downloaded or generated locally and **none of it is committed to Git**:
-
-| File | Created by | Contents |
-|---|---|---|
-| `goodreads_books.json.gz`, `goodreads_book_authors.json.gz` | you (download) | Raw Goodreads data |
-| `authors.db` | `build_authors_db.py` | Author id to name lookup |
-| `goodreads.db` | `stream_goodreads_index.py` | Book metadata, vibe/emotion scores, FTS5 keyword index |
-| `chroma_db/` | `stream_goodreads_index.py` | ChromaDB vector store (collection `goodreads_books`) |
-| `ingestion_status.json` | `stream_goodreads_index.py` | Live indexing progress |
-
-Two reasons to keep them out of the repo:
-
-1. **Size.** `goodreads.db` and the ChromaDB files are far over GitHub's 100 MB per-file limit.
-2. **Licence.** The Goodreads data was collected for academic use only and may not be redistributed or used commercially (see the [dataset page](https://mcauleylab.ucsd.edu/public_datasets/gdrive/goodreads/UCSD%20Book%20Graph.html)). The databases contain book descriptions from it.
-
-Add this to `.gitignore`:
-
-```gitignore
-data/*
-!data/.gitkeep
-```
-
-**Rebuilding the index.** If you change the embedding model, the filters or the scoring logic, delete the generated files in `data/` (keep the downloaded `.json.gz` files) and run the build scripts again. The model that encodes search queries at runtime must be the same one used to build the index (`sentence-transformers/all-MiniLM-L6-v2`), otherwise rankings will be meaningless.
-
----
-
-## How the Ranking Works
-
-ShelfSense implements a multi-stage hybrid ranking and re-ranking architecture designed to optimize both semantic intent and reader preference:
-
-### 1. Dense Semantic Retrieval
-Each book is indexed as one text built from its title, authors, top genres (Goodreads shelves) and the first 350 characters of its description. The user's natural language inquiry is encoded into a 384-dimensional normalized vector using `sentence-transformers/all-MiniLM-L6-v2`. ChromaDB computes cosine distances across all indexed books:
-$$\text{sim}_{\text{dense}}(q, d) = 1.0 - \text{cosine\_dist}(q, d)$$
-The top 120 dense candidates are retained with their ranks $\text{rank}_{\text{dense}}(d)$.
-
-### 2. Lexical Keyword Matching (BM25)
-Concurrently, the query is tokenized (common words such as "the" and "novel" are dropped) and scored with SQLite FTS5's BM25 ranking, using Porter stemming over book titles, authors and descriptions. The top 120 lexical matches are retained with their ranks $\text{rank}_{\text{bm25}}(d)$.
-
-### 3. Reciprocal Rank Fusion (RRF)
-To prevent scale variance between vector cosine similarity and unbounded BM25 scores, candidates are merged using Reciprocal Rank Fusion:
-$$\text{RRF Score}(d) = \frac{0.60}{60 + \text{rank}_{\text{dense}}(d)} + \frac{0.40}{60 + \text{rank}_{\text{bm25}}(d)}$$
-Where $k = 60$ is the standard smoothing constant, and a candidate that appears in only one list is given rank 500 in the other. RRF scores are normalized into $[0, 1]$.
-
-The two retrievers often surface different books: dense search finds books that match the *meaning* of the query, BM25 finds books that contain its *words*. A book that appears in only one list shows a `null` rank for the other in its ranking explanation, which is normal for descriptive queries.
-
-### 4. Hard Filters & Continuous Vibe Slider Re-Ranking
-Candidates are first narrowed by any hard filters: category, year range, maximum pages, minimum rating, and tone (the book's score for that emotion must be at least 0.10).
-
-ShelfSense then applies 4 continuous vibe axes in $[-1.0, 1.0]$, computed once when the book is indexed:
-- **Dark ↔ Light**: Projection of the book's embedding onto a grim/bleak versus lighthearted/heartwarming anchor axis.
-- **Fast-paced ↔ Slow-burn**: Projection onto an action-packed versus contemplative/atmospheric anchor axis.
-- **Cerebral ↔ Escapist**: Projection onto a philosophical/demanding versus cozy/easy-read anchor axis.
-- **Short ↔ Epic**: Piecewise-linear page count mapping: under 200 pages scores in $[-1.0, -0.2]$, 200–450 pages in $[-0.2, 0.2]$, and over 450 pages in $[0.2, 1.0]$ (capped at 1,000 pages; unknown page counts score 0).
-
-The seven emotion scores (joy, sadness, fear, anger, surprise, disgust, neutral) come from comparing each book's embedding with a descriptive anchor sentence for each emotion.
-
-When the reader adjusts a slider to $S_{\text{axis}}$, an alignment multiplier is applied:
-$$\text{alignment}_{\text{axis}} = 1.0 - \frac{|S_{\text{axis}} - B_{\text{axis}}|}{2.0}$$
-$$\text{Multiplier} = 1.0 + \sum_{\text{axes}} |S_{\text{axis}}| \times (\text{alignment}_{\text{axis}} - 0.5) \times 0.8$$
-$$\text{Final Score}(d) = \text{RRF Score}(d) \times \text{Multiplier}$$
-Axes whose slider is within ±0.08 of neutral are ignored, and the multiplier is floored at 0.2.
-
-### 5. Grounded Snippet Highlighting & LLM Explanations
-For each candidate, the description is broken into sentences. Sentence-level cosine similarity extracts the exact sentence that best answers the user's inquiry. The pluggable LLM provider (Google Gemini or offline fallback) generates a concise 1–2 sentence explanation grounded strictly in the book's verified text.
-
----
+ShelfSense is a Next.js app that runs on **Vercel**, with the full **UCSD Goodreads Book Graph** in **MongoDB Atlas**. Search is hybrid: Atlas Vector Search handles meaning and Atlas Search (BM25) handles exact words. The two are fused with Reciprocal Rank Fusion and re-ranked by vibe sliders and a reader-love prior. On top of that sit an AI librarian, taste matching, a personal fit score for every book, and a reading-DNA profile of your shelf.
 
 ## Features
 
-| Feature | Description |
+| | |
 |---|---|
-| **Natural Language Search** | Debounced search box with rotating animated prompt ideas and example inspiration chips. |
-| **Vibe Sliders** | Continuous live re-ranking sliders (Dark ↔ Light, Fast-paced ↔ Slow-burn, Cerebral ↔ Escapist, Short ↔ Epic). |
-| **Why this book?** | LLM-generated rationale grounded strictly in book description + highlighted sentence snippet. |
-| **Book DNA Radar Chart** | 9-dimensional radar visualization (7 emotions + Pacing + Length) with side-by-side comparison modal. |
-| **Taste Profile ("Books I Love")** | Select 1–5 books, adjust star ratings, and synthesize composite taste vectors with attribution. |
-| **Contrast Mode** | "Like this book, but..." vector arithmetic ($v_{\text{book}} + \alpha \cdot v_{\text{modifier}}$). |
-| **Reading Shelf** | Want to Read / Reading / Finished board with localStorage persistence, drag-and-drop, and shelf-based recommendations. |
-| **Conversational Refine** | Chat drawer with stateful AI librarian that updates query, filters, sliders, and results in place. |
-| **Explainable Ranking** | "How was this ranked?" popovers detailing dense rank, BM25 rank, RRF score, and vibe adjustments. |
-| **Editorial Modern Library UI** | Warm paper & deep ink palette, typography pairing (Newsreader serif + Plus Jakarta Sans), 3D cover tilt, dark mode toggle. |
+| **Natural-language search** | Understands constraints in plain English (*"under 300 pages"*, *"from the 90s"*, *"rated over 4"*, *"sci-fi"*), vibe words (*"dark"*, *"cozy"*, *"fast-paced"*) and negations (*"less dark"*, *"not too long"*), and shows what it understood as chips. |
+| **"Like X, but…"** | *"books like Gone Girl but less dark"* searches from that book's own vector, skips its series, sequels and translations, re-ranks by shared Goodreads shelves and applies the modifier. |
+| **AI Librarian** | A streaming chat. An LLM on Groq turns the conversation into a search, retrieves real catalogue books, then recommends and explains them grounded in their descriptions. You refine it by talking ("shorter", "more like the second one"). |
+| **Taste Match** | Pick books you loved (star-weighted) and books that weren't for you. A taste vector finds their nearest relatives. Free-text modifiers bend it: *"like these, but set in space"*. |
+| **Your match** | Every book page scores the book (0-100) against your shelf and says why, naming the closest books you loved. |
+| **Reading DNA** | Analyses your shelf: emotional fingerprint, vibe, top categories and genres, eras, and an AI-written reader persona with suggested searches. |
+| **Goodreads import** | Upload your Goodreads library export (CSV). Books are matched by Goodreads id, then ISBN, then title and author, keeping your ratings and shelves. |
+| **Shareable shelves** | Publish a read-only snapshot of your shelf at `/s/<id>`. Friends can add all of it to their own shelf. |
+| **Book pages** | Book DNA radar (compare with any other book), vibe bars, series, more by the author, and "if you like this, try…" neighbours. |
+| **Discover** | 12 mood collections, 14 categories, most read, top rated (Bayesian), hidden gems and "surprise me". |
+| **Explainable ranking** | "How was this ranked?" shows the vector rank, BM25 rank, RRF score, vibe multiplier, reader-love prior and shared-shelf overlap. |
+| **Works without keys** | With no Groq key, every AI feature falls back to a deterministic, grounded offline version. |
 
----
+## Architecture
 
-## Known Limitations
+```mermaid
+graph LR
+  subgraph Pipeline["Data pipeline (Python, run once)"]
+    GZ["Goodreads dumps<br/>books · authors · works · series · genres"] --> ING[ingest_goodreads.py]
+    OLD["Existing local index<br/>goodreads.db + chroma_db"] --> MIG[migrate_local_index.py]
+    ING --> ATLAS
+    MIG --> ATLAS
+  end
+  subgraph ATLAS["MongoDB Atlas"]
+    B[(books<br/>+ BSON vectors)]
+    A[(authors · series · meta)]
+    S[(shelves · embedding_cache)]
+    VS{{books_vector<br/>Vector Search}}
+    TS{{books_text<br/>Atlas Search + autocomplete}}
+  end
+  subgraph Vercel["Vercel: Next.js 16 App Router"]
+    UI["Pages: home · search · book · author<br/>discover · librarian · taste · shelf"]
+    API["Route handlers: /api/search · librarian · recommend<br/>fit · insights · explain · autocomplete · shelves"]
+  end
+  UI --> API --> ATLAS
+  API --> HF["Hugging Face Inference<br/>(query embeddings)"]
+  API --> GEM["Groq · gpt-oss-120b<br/>(librarian, explanations, personas)"]
+```
 
-- **Discovery Galaxy:** the 2D UMAP map needs a projection of every book, which the Goodreads indexer does not compute yet, so the Galaxy view is not supported with this index.
-- **Filters:** only the minimum-rating filter is applied inside ChromaDB. The other filters run on the 400 best candidates, so very strict combinations can return few results.
-- **Categories:** the UI's categories are mapped from Goodreads shelf names with keyword rules, so a book's category is approximate.
-- **Book ids:** many Goodreads books have no ISBN-13. They are identified by their Goodreads book id instead.
-- **Data licence:** the Goodreads data is for academic use only (see below).
+```
+app/                 pages + API route handlers (Next.js App Router)
+components/          UI components
+lib/server/          MongoDB, embeddings, hybrid search, recommendations, LLM (server-only)
+lib/                 shared types, constants, client API, local shelf store
+scripts/             Python data pipeline → MongoDB
+docker-compose.yml   local MongoDB with Atlas Search + Vector Search
+```
 
----
+## Quickstart (local)
 
-## API Documentation
+**Requirements:** Node 20.9+, Python 3.10+ and Docker. You can use an Atlas cluster instead of Docker.
 
-- `POST /api/search`: Hybrid search with filters and vibe sliders.
-- `POST /api/similar`: Taste profile synthesis and contrast mode recommendations.
-- `POST /api/explain`: Grounded explanation and matching sentence extraction.
-- `POST /api/chat`: Conversational refinement drawer updates.
-- `GET /api/book/{isbn13}`: Detailed book metadata and DNA scores.
-- `GET /api/galaxy`: 2D scatter coordinates (not supported with the Goodreads index yet).
-- `GET /api/health`: Health status and index statistics.
+```bash
+npm install
+cp .env.example .env.local
+docker compose up -d mongo        # MongoDB + Atlas Search/Vector Search on :27017
+```
 
-Interactive Swagger documentation is available at **http://localhost:8000/docs**. When trying `POST /api/search` there, replace the placeholder `"string"` values in the example body (they would filter for a category literally named "string"), or leave `category` and `tone` empty.
+Load books into MongoDB (see [Loading the catalogue](#loading-the-catalogue)), then:
 
----
+```bash
+npm run dev                        # http://localhost:3000
+```
 
-## Data Sources & Citation
+Check `http://localhost:3000/api/health`. It reports the book count, whether both search indexes are queryable, the embedding provider and the LLM.
 
-**Goodreads data: UCSD Book Graph.** Collected for academic use only; please do not redistribute it or use it commercially. If you use it, cite:
+## Loading the catalogue
 
-- Mengting Wan, Julian McAuley, "Item Recommendation on Monotonic Behavior Chains", in *RecSys'18*.
-- Mengting Wan, Rishabh Misra, Ndapa Nakashole, Julian McAuley, "Fine-Grained Spoiler Detection from Large-Scale Review Corpora", in *ACL'19*.
+Install the pipeline's dependencies once:
+
+```bash
+py -3.11 -m pip install -r requirements.txt     # macOS/Linux: python3 -m pip install -r requirements.txt
+```
+
+Both loaders do the same things:
+
+- write identical documents
+- create every index (B-tree, Atlas Search and Vector Search)
+- build the `authors`, `series` and `meta` collections
+- resume safely if interrupted
+
+### Option A: full Goodreads dataset from the raw dumps (recommended)
+
+Download from the [UCSD Book Graph page](https://mcauleylab.ucsd.edu/public_datasets/gdrive/goodreads/UCSD%20Book%20Graph.html) into `data/`:
+
+| File | Needed? | Used for |
+|---|---|---|
+| `goodreads_books.json.gz` | required | 2.36M editions: titles, descriptions, shelves, ratings |
+| `goodreads_book_authors.json.gz` | strongly recommended | author names |
+| `goodreads_book_works.json.gz` | recommended | one edition per work, work-level ratings, original year |
+| `goodreads_book_series.json.gz` | optional | series names and reading order |
+| `goodreads_book_genres_initial.json.gz` | optional | better categories |
+
+```bash
+py -3.11 scripts/ingest_goodreads.py --books data/goodreads_books.json.gz \
+  --authors data/goodreads_book_authors.json.gz --works data/goodreads_book_works.json.gz \
+  --series data/goodreads_book_series.json.gz --genres data/goodreads_book_genres_initial.json.gz
+```
+
+The script makes two passes over the books file:
+
+1. It picks the most-rated edition of each work that has a description of at least 20 words. It keeps English and unknown-language editions; `--all-languages` keeps the rest.
+2. It embeds each chosen book with `all-MiniLM-L6-v2`, scores its vibes and emotions, and upserts it.
+
+Add `--limit 2000` for a smoke test. A CUDA build of PyTorch makes embedding 10–20× faster.
+
+### Option B: reuse an existing local index (fast)
+
+If you built `data/goodreads.db` and `data/chroma_db` with the previous version of ShelfSense, copy them over without re-embedding:
+
+```bash
+py -3.11 scripts/migrate_local_index.py
+```
+
+This loaded **488,446 books in 5.5 minutes** in testing; 90,882 duplicate editions were collapsed. The old indexer stopped after scanning about 724K of the 2.36M editions, so some famous books are missing from that index (the main *Dune* edition, for example). Use option A for the complete catalogue.
+
+### Sizing and Atlas tiers
+
+Measured with float32 vectors and descriptions capped at 2,000 characters: **about 3.1 KB per book** (1.36 GB of storage for 488K books). int8 vectors (`--vector-format int8`) store each vector in 384 bytes instead of 1,536.
+
+| Atlas tier | Storage | Suggested load |
+|---|---|---|
+| M0 (free) | 512 MB | `--preset free`: the 150K most-rated books, int8 vectors, 700-character descriptions. Set `VECTOR_FORMAT=int8`. |
+| Flex | 5 GB | everything, float32 (the default) |
+| M10+ | 10 GB+ | everything, plus headroom for vector search memory |
+
+`VECTOR_FORMAT` in the app must match the `--vector-format` you loaded with.
+
+## Deploying to Vercel
+
+1. **Atlas:** create a cluster, a database user, and allow network access from Vercel. `0.0.0.0/0`, or the Vercel ↔ Atlas integration, which also sets `MONGODB_URI` for you.
+2. **Load the data** from your machine with `MONGODB_URI` pointing at Atlas (see above). Wait until `scripts/setup_indexes.py` reports that both search indexes are queryable.
+3. **Import the repo** in Vercel. It is a standard Next.js project at the repository root, so no build settings are needed.
+4. **Environment variables** (Project → Settings → Environment Variables):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `MONGODB_URI` | yes | Atlas connection string |
+| `MONGODB_DB` | no | default `shelfsense` |
+| `VECTOR_FORMAT` | no | `float32` (default) or `int8`, matching the load |
+| `HF_TOKEN` | recommended | free [Hugging Face token](https://huggingface.co/settings/tokens) (fine-grained, with *Make calls to Inference Providers*) for query embeddings. Without it, Vercel falls back to keyword-only search. |
+| `EMBEDDINGS_PROVIDER` | no | `auto` (default), `hf`, `local` or `none` |
+| `GROQ_API_KEY` | optional | free [Groq key](https://console.groq.com/keys); enables the AI librarian, explanations, fit verdicts and personas. Without it they use offline fallbacks. |
+| `GROQ_MODEL` | no | default `openai/gpt-oss-120b` (`openai/gpt-oss-20b` is faster) |
+
+### Getting the two free keys
+
+- **`HF_TOKEN`:** sign in at [huggingface.co](https://huggingface.co), open **Settings → Access Tokens** ([direct link](https://huggingface.co/settings/tokens)), click **Create new token**, choose **Fine-grained**, tick **Make calls to Inference Providers**, and create it. The token starts with `hf_`. Free accounts get a small monthly inference allowance; one search is one tiny embedding call, and repeats are cached.
+- **`GROQ_API_KEY`:** sign in at [console.groq.com](https://console.groq.com) (no card needed), open **API Keys** ([direct link](https://console.groq.com/keys)), click **Create API Key**, and copy it right away (it starts with `gsk_` and is shown once). The free tier is rate-limited per minute and per day; when a limit is hit, the app quietly uses its offline answers.
+
+Put both in `.env.local` for local development and in Vercel's environment variables for production. Never commit them.
+
+**Why Hugging Face for query embeddings?** The catalogue was embedded with `sentence-transformers/all-MiniLM-L6-v2`, so queries must use the same model. Locally it runs inside Node through `@huggingface/transformers`. Its ONNX runtime is about 290 MB, which is too large for a Vercel function, so on Vercel the same model is called through the Hugging Face Inference API. Query vectors are cached in MongoDB (`embedding_cache`, 30-day TTL), so repeat searches skip the call.
+
+## How ranking works
+
+1. **Query understanding** (`lib/server/intent.ts`): pulls hard filters, vibe sliders and negations out of the text. *"like X"* is resolved to a catalogue book.
+2. **Retrieval:** both run in parallel with the same pre-filters:
+   - `$vectorSearch` returns the top 150 by cosine similarity to the query (or to the anchor book plus the modifier).
+   - `$search` returns the top 150 by BM25 over title, authors, shelves and description, with vibe adjectives removed from the keywords.
+3. **Fusion:** `RRF = 0.6 / (60 + rank_vector) + 0.4 / (60 + rank_text)`, normalised to [0, 1].
+4. **Re-ranking:** the RRF score is multiplied by four factors:
+   - **Vibe alignment**, per slider: `1 + Σ |s| · (alignment − 0.5) · 0.8`.
+   - **Reader-love prior:** `(0.62 + 0.38 · log-readership) × (0.92 + 0.08 · Bayesian rating)`. Box sets are discounted to ×0.75 and study guides to ×0.4.
+   - **Shelf overlap** with the anchor book (for "like X" searches).
+   - **Title-echo penalty**, so *"space opera with found family"* isn't won by a book titled *Space Opera*.
+
+   Exact title matches and author-name queries are boosted.
+5. **Grounding:** the description sentence closest to the query is highlighted. LLM explanations may only use the book's own text.
+
+Every factor is shown in the "How was this ranked?" popover.
+
+## API
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/api/search` | `{query, filters?, sliders?, limit?, excludeIds?}` → hybrid results and the parsed intent |
+| `POST` | `/api/librarian` | `{messages, previous?, shownIds?, readIds?}` → NDJSON stream of `plan`, `books`, `text` and `done` events |
+| `POST` | `/api/recommend` | `{loved:[{id,rating}], disliked?, modifier?, exclude?}` → taste-profile or contrast results |
+| `POST` | `/api/fit` | `{id, loved, disliked?}` → personal match score and verdict |
+| `POST` | `/api/insights` | `{books:[{id,rating}]}` → reading DNA and persona |
+| `POST` | `/api/explain` | `{id, query, snippet?}` → grounded "why this book" |
+| `GET` | `/api/books/:id` · `/api/books/:id/similar` | book details · nearest neighbours |
+| `POST` | `/api/books/lookup` | resolve Goodreads export rows to catalogue books |
+| `GET` | `/api/autocomplete?q=` | title and author typeahead |
+| `GET` | `/api/browse?kind=popular\|top\|gems&category=` | browse lists |
+| `GET` | `/api/surprise` | a random well-loved book |
+| `POST`/`GET` | `/api/shelves` · `/api/shelves/:id` | publish or read a shared shelf |
+| `GET` | `/api/health` | database, index, embedding and LLM status |
+
+## Known limitations
+
+- **Small embedding model.** `all-MiniLM-L6-v2` is fast and cheap, but for short descriptive queries it sometimes favours books whose titles share the query's words. The ranking counteracts this but doesn't remove it. An A/B test on 30K books found that embedding descriptions first, instead of titles first, did not help, so the bigger win would be a stronger embedding model. That means re-embedding the catalogue and using the same model for queries.
+- **Data age and licence.** The UCSD dump was scraped in 2017 and is for academic, non-commercial use only. Don't redistribute it. Cite: Mengting Wan, Julian McAuley, *"Item Recommendation on Monotonic Behavior Chains"*, RecSys 2018, and Mengting Wan, Rishabh Misra, Ndapa Nakashole, Julian McAuley, *"Fine-Grained Spoiler Detection from Large-Scale Review Corpora"*, ACL 2019.
+- **The shelf lives in the browser.** It is stored in `localStorage`, with no accounts. Use Share to publish a snapshot, and import a Goodreads CSV to restore it elsewhere.

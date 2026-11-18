@@ -1,15 +1,7 @@
-torch>=2.2
-sentence-transformers>=3.0.0
-chromadb>=0.5.0
-rank-bm25>=0.2.2
-umap-learn>=0.5.6
-google-genai>=0.1.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
-pydantic>=2.7.0
-pandas>=2.2.0
-numpy
-scikit-learn>=1.4.0
-httpx>=0.27.0
+# Data pipeline only (scripts/). The web app itself is Node.js — see package.json.
+pymongo>=4.10          # BSON binary vectors (Binary.from_vector)
 python-dotenv>=1.0.0
-kagglehub>=0.2.0
+numpy>=1.26
+sentence-transformers>=3.0.0   # embeddings for ingest_goodreads.py (and books missing a vector)
+torch>=2.2                     # install a CUDA build from pytorch.org for 10-20x faster ingestion
+chromadb>=0.5.0                # only needed by migrate_local_index.py (reads the old local index)
