@@ -1,0 +1,15 @@
+# Keep `vercel deploy` uploads to what the Next.js build needs.
+.env*
+!.env.example
+.claude
+.next
+node_modules
+data
+models
+report_generator
+docker-compose.yml
+requirements.txt
+tsconfig.tsbuildinfo
+# The Python data pipeline runs on your machine, not on Vercel; prebuild only needs fetch-model.mjs.
+scripts/*
+!scripts/fetch-model.mjs
