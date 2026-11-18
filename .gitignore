@@ -27,6 +27,9 @@ __pycache__/
 data/*
 !data/.gitkeep
 
+# query-embedding model, downloaded by `npm run model` / before every build
+/models/
+
 # misc
 .DS_Store
 *.pem

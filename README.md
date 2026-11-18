@@ -43,7 +43,7 @@ graph LR
     API["Route handlers: /api/search · librarian · recommend<br/>fit · insights · explain · autocomplete · shelves"]
   end
   UI --> API --> ATLAS
-  API --> HF["Hugging Face Inference<br/>(query embeddings)"]
+  API --> HF["all-MiniLM-L6-v2 in the function<br/>(query embeddings, ONNX)"]
   API --> GEM["Groq · gpt-oss-120b<br/>(librarian, explanations, personas)"]
 ```
 
@@ -62,6 +62,7 @@ docker-compose.yml   local MongoDB with Atlas Search + Vector Search
 
 ```bash
 npm install
+npm run model                      # downloads the query-embedding model into ./models (90 MB, once)
 cp .env.example .env.local
 docker compose up -d mongo        # MongoDB + Atlas Search/Vector Search on :27017
 ```
@@ -148,19 +149,23 @@ Measured with float32 vectors and descriptions capped at 2,000 characters: **abo
 | `MONGODB_URI` | yes | Atlas connection string |
 | `MONGODB_DB` | no | default `shelfsense` |
 | `VECTOR_FORMAT` | no | `float32` (default) or `int8`, matching the load |
-| `HF_TOKEN` | recommended | free [Hugging Face token](https://huggingface.co/settings/tokens) (fine-grained, with *Make calls to Inference Providers*) for query embeddings. Without it, Vercel falls back to keyword-only search. |
-| `EMBEDDINGS_PROVIDER` | no | `auto` (default), `hf`, `local` or `none` |
+| `EMBEDDINGS_PROVIDER` | no | `auto`/`local` (default: bundled model), `hf` (needs `HF_TOKEN` with credits) or `none` |
 | `GROQ_API_KEY` | optional | free [Groq key](https://console.groq.com/keys); enables the AI librarian, explanations, fit verdicts and personas. Without it they use offline fallbacks. |
 | `GROQ_MODEL` | no | default `openai/gpt-oss-120b` (`openai/gpt-oss-20b` is faster) |
 
-### Getting the two free keys
+### Getting the free Groq key
 
-- **`HF_TOKEN`:** sign in at [huggingface.co](https://huggingface.co), open **Settings → Access Tokens** ([direct link](https://huggingface.co/settings/tokens)), click **Create new token**, choose **Fine-grained**, tick **Make calls to Inference Providers**, and create it. The token starts with `hf_`. Free accounts get a small monthly inference allowance; one search is one tiny embedding call, and repeats are cached.
-- **`GROQ_API_KEY`:** sign in at [console.groq.com](https://console.groq.com) (no card needed), open **API Keys** ([direct link](https://console.groq.com/keys)), click **Create API Key**, and copy it right away (it starts with `gsk_` and is shown once). The free tier is rate-limited per minute and per day; when a limit is hit, the app quietly uses its offline answers.
+Sign in at [console.groq.com](https://console.groq.com) (no card needed), open **API Keys** ([direct link](https://console.groq.com/keys)), click **Create API Key**, and copy it right away (it starts with `gsk_` and is shown once). The free tier is rate-limited per minute and per day; when a limit is hit, the app quietly uses its offline answers. Put it in `.env.local` for local development and in Vercel's environment variables for production. Never commit it.
 
-Put both in `.env.local` for local development and in Vercel's environment variables for production. Never commit them.
+**How query embeddings work (no key needed).** The catalogue was embedded with `sentence-transformers/all-MiniLM-L6-v2`, so queries must use the same model. It runs inside the Vercel function through `@huggingface/transformers`:
 
-**Why Hugging Face for query embeddings?** The catalogue was embedded with `sentence-transformers/all-MiniLM-L6-v2`, so queries must use the same model. Locally it runs inside Node through `@huggingface/transformers`. Its ONNX runtime is about 290 MB, which is too large for a Vercel function, so on Vercel the same model is called through the Hugging Face Inference API. Query vectors are cached in MongoDB (`embedding_cache`, 30-day TTL), so repeat searches skip the call.
+- `npm run build` first runs `scripts/fetch-model.mjs`, which downloads the ONNX model (90 MB, fp32) into `models/`. That folder is git-ignored.
+- `next.config.ts` ships the model and the Linux x64 ONNX runtime with the four routes that embed queries. Other platforms' binaries are left out, so each of those functions is about 165 MB, under Vercel's 250 MB limit.
+- `vercel.json` sets `ONNXRUNTIME_NODE_INSTALL=skip` so the install step doesn't download the CUDA GPU runtime.
+- The first search on a cold instance takes 1–3 s to load the model; after that, embedding a query takes a few milliseconds.
+- Query vectors are also cached in MongoDB (`embedding_cache`, 30-day TTL).
+
+`EMBEDDINGS_PROVIDER=hf` with an `HF_TOKEN` calls the Hugging Face Inference API instead. It falls back to the bundled model on any error, but free Hugging Face accounts get very few credits, so the default is recommended.
 
 ## How ranking works
 
